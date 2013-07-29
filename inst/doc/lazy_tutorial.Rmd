@@ -1,0 +1,187 @@
+# Lazy Evaluation for Recursive and Functional Data Structures in R
+
+R is somewhat notorious for its lazy evaluation of function
+arguments. Each argument to R function is not evaluated immediately
+but encapsulated in a promise containing the expression and the
+enclosign environment; the romise is evaluated on demand.
+
+In practice, the lazy evaluation of function arguments is most often
+used to _bypass_ the normal evaluation of arguments, rather than
+explicitly for its lazyness. The usual use of lazy promises, if R code
+notices them at all, is to subvert them and turn R functions into
+fexprs.
+
+Strangely, while lazy evaluation is often _bypassed_ to make R
+functions behave like Lisp macros or other syntattic operations, lazy
+evaluation is rarely if ever actually _used_ to defer computations.
+
+This is strange because there are several interesting uses that lazy
+evaluation can be put to, which are almost never used in practice.
+
+Efficient, purely functional data structures are something R needs
+sorely; the greatest unnecessary memory and performance sink in most R
+code is in the allocation and duplication of only-slightly-modified
+arrays. R's style of passing by value and not allowing nonlocal
+destructive updates is overall a good thing, but R lacks the data
+structures needed to make this efficient.
+
+As it turns out, the data structures needed for efficient use of
+non-mutable objects are a popular topic of CS research, and the
+published algorithms (especially those in Okasaki's much-cited work)
+often rely on something R actually has -- lazy evaluation. So how come
+no one has tied the knot and taken these lazy functional data
+structures to R? It is a mystery.
+
+## Preliminaries: Tail recursion
+
+Most functional-programming tutorials make great hay about factorials
+and Fibbonacci sequences, which makes one wonder why all these
+roundabout ways of making simple computations. This will unfortunately
+start out the same way. Bear with me; later on I'll show how to do
+something closer to most R user's hearts, such as using a few lines of
+code to compute an expremely accurate numerical gradient of an
+functions.
+
+But we'll start with the textbook-standard, tail-recursive
+implementation of the factorial function:
+
+```R
+library(gmp) #for big integers
+factorial <- function(n, accum=as.bigz(1)){
+  if(n <= 1) accum
+  else factorial(n-1, n*accum)
+}
+factorial(4)
+factorial(100)
+```
+
+The problem with this is that computing large factorials blows the stack:
+
+```R{eval=FALSE}
+factorial(3000)
+```
+
+```
+Error: evaluation nested too deeply: infinite recursion / options(expressions=)?
+Error during wrapup: evaluation nested too deeply: infinite recursion / options(expressions=)?
+```
+
+Now, some languages have "tail call elimination" which can avoid this
+problem. Basically, these languages note that once you start
+evaluating the last expression before a function returns, here
+`factorial(n-1, accum)`, you can go ahead and get pop the frame
+function's arguments off the stack. In other words, the final value of
+the function is computed _after_ starting the process of "returning"
+from the function call.
+
+That sounds a little like deferred evaluation, right? We can explait
+R's lazy evaluation to defer the tail call until after the function
+has "officially" finished and is no longer on the stack.
+
+```R
+tailcall <- function(x) structure(function() x, class="tailcall")
+recursive <- function(fn) {
+    force(fn)
+    function(...) {
+        retval <- fn(...)
+        while("tailcall" %in% class(retval)) retval <- retval()
+        retval
+    }
+}
+```
+
+The function `tailcall` just defers evaluating its argument until it's
+called by `recursive`. The function `recursive` wraps a function
+definition and keeps forcing its tail values until it's done (this
+techniqe of avoiding stack overflow by returning the continuation of
+the computation further up the stack is sometimes called a
+"[trampoline][trampoline].")
+
+[trampoline]: http://web.mit.edu/kmill/www/programming/tailcall.html
+
+Now we can define a factorial that doesn't blow the stack:
+
+```R
+factorial2 <- recursive(local({
+  factorial2 <- function(n, accum = as.bigz(1)) {
+    force(accum)
+    if (n <= 1) accum
+    else tailcall(factorial2(n-1, accum*n))
+  }
+})
+```
+
+```R
+factorial2(5000)
+```
+
+NB. `factorial2` has to avoid calling another instance of `tailcall`,
+hence the assignment in a `local`. Is there a simpler way to express
+this?
+
+NB. Forcing 'accum' is also necessary to prevent blowing stack on
+promise evaluation.
+
+## Preliminaries: Lazy Data
+
+One thing you notice in
+perusing functional programming tutorials is that the lazy languages
+have lazy _data structures_, which R eschews. In R, the code
+
+```R
+x <- list(a+b, c, d+costlyFunction(x))
+```
+
+evaluates all the expressions, `a+b`, `c`, and so, on then binds them
+into a list of values In Haskell, the code
+
+```
+let x = [a+b, c, d+costlyFunction(e)]
+```
+
+returns an object[^haskellReturning] that you can treat like a list,
+but defers the actual evaluation until it is needed.
+
+[^haskellReturning]: "Returns an object" notionally rather than literally, as
+Haskell might defer actually defer actually constructing any objects in memory.
+
+So to translate lazy algorithms into R, we will need a lazy data
+structure -- something that has slots that aren't resolved until you
+ask for them. Luckily, this is straightforward:
+
+```R
+lazy_pair <- function(left, right) environment()
+```
+
+This just makes an object with two lazy slots, that can be accessed
+and evaluated with `$`:
+
+```R
+x <- lazyPair({print("left"); 2}; {print("right!"); 2))
+x$left
+x$left
+x$right
+X$right
+```
+
+(Environments are rather heavyweight for these purposes; the `lazr`
+package will include more optimized building blocks.)
+
+## Infinite, lazy sequences
+
+### Application: Numerical gradient
+
+## Moving on to lazy data structures
+
+## Applications: functional queue
+
+## Applications: breadth first search
+
+(Here is an alternate implementation of lazy pair based on dotlists.)
+```R
+lpair <- function(...) get("...")
+using_lazy <- function(fn) function(x) (function(...) {assign("...", x); fn(...)})()
+lfirst <- using_lazy(function(...) if (nargs() > 0) ..1 else NULL)
+lrest <- using_lazy(function(....x, ...) lfirst(get("...")))
+#note extra car; lpair(x,y) really creates dotsxp(x, dotsxp(y, null))
+```
