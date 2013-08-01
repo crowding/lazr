@@ -1,0 +1,15 @@
+Package: lazr
+Title: Lazy and purely functional data structures for R
+Version: 0.0.1
+Authors@R: c(person("Peter", "Meilstrup", role=c("aut", "cre"),
+    email=c("peter.meilstrup@gmail.com")))
+Description: Efficient data structures for those times when arrays don't cut
+    it. Will include queues, purely functional double-ended queues,
+    double-ended queues with random access/insert/delete/catenate in O(log N),
+    priority queues, and etc. Also includes tools to construct lazy data
+    structures and infinite sequences.
+Depends:
+    R (>= 3.0.1)
+License: MIT
+Collate:
+    'queue.R'
